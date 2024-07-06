@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 
@@ -21,6 +22,10 @@ class MyApp extends StatelessWidget {
       title: 'Flutter Demo',
       theme: ThemeData(
         useMaterial3: false,
+        fontFamily: 'Folks',
+        colorScheme: ColorScheme.fromSwatch().copyWith(
+          primary: const Color(0xFF58C2FF),
+        ),
       ),
       home: const MyHomePage(),
     );
@@ -37,7 +42,8 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _controller = TextEditingController();
   String _selectedFormat = 'MP4';
-  bool _isDownloading = false;
+  final List<_DownloadTask> _downloadTasks = [];
+  bool _isDownloadInProgress = false;
 
   void _selectFormat(String format) {
     setState(() {
@@ -46,11 +52,14 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _downloadVideo(String url) async {
+    if (_isDownloadInProgress) {
+      return; // Don't start a new download if one is already in progress
+    }
+    setState(() {
+      _isDownloadInProgress = true;
+    });
+    _controller.clear();
     if (await Permission.storage.request().isGranted) {
-      setState(() {
-        _isDownloading = true;
-      });
-
       try {
         var ytExplode = YoutubeExplode();
         var video = await ytExplode.videos.get(url);
@@ -59,7 +68,7 @@ class _MyHomePageState extends State<MyHomePage> {
         var streamInfo = _selectedFormat == 'MP3'
             ? manifest.audioOnly.withHighestBitrate()
             : manifest.muxed.withHighestBitrate();
-        var stream = ytExplode.videos.streamsClient.get(streamInfo);
+        var downloadStream = ytExplode.videos.streamsClient.get(streamInfo);
         var videoTitle = video.title
             .replaceAll(RegExp(r'[^\w\s-]'), '')
             .trim()
@@ -69,47 +78,90 @@ class _MyHomePageState extends State<MyHomePage> {
 
         Directory? directory;
         if (Platform.isAndroid) {
-          directory = Directory('/storage/emulated/0/Download');
+          directory = Directory('/storage/emulated/0/ytbinstaDownloader');
         } else if (Platform.isIOS) {
           directory = await getApplicationDocumentsDirectory();
         }
 
         if (directory != null) {
+          if (!await directory.exists()) {
+            await directory.create(recursive: true);
+          }
+
           var savePath =
               '${directory.path}/$videoTitle.${_selectedFormat.toLowerCase()}';
           var file = File(savePath);
           var output = file.openWrite();
 
-          await for (var data in stream) {
-            output.add(data);
-          }
-
-          await output.close();
-
-          ytExplode.close();
-
-          setState(() {
-            _isDownloading = false;
+          var totalSize = streamInfo.size.totalBytes;
+          var downloadedBytes = 0;
+          var timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+            var downloadSpeed =
+                (downloadedBytes / timer.tick) / (1024 * 1024); // MB/s
+            var progress = downloadedBytes / totalSize;
+            setState(() {
+              _downloadTasks.last.progress = progress;
+              _downloadTasks.last.downloadedMB =
+                  downloadedBytes / (1024 * 1024); // Convert to MB
+              _downloadTasks.last.downloadSpeed = downloadSpeed;
+            });
           });
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    '${_selectedFormat.toUpperCase()} saved to $savePath')),
+          var subscription = downloadStream.listen(
+            (data) {
+              output.add(data);
+              downloadedBytes += data.length;
+            },
+            onDone: () async {
+              await output.close();
+              ytExplode.close();
+              timer.cancel();
+              setState(() {
+                _downloadTasks.last.isDownloading = false;
+                _downloadTasks.last.progress =
+                    1.0; // Ensure progress reaches 100%
+                _isDownloadInProgress = false; // Reset the flag
+              });
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                    content: Text(
+                        '${_selectedFormat.toUpperCase()} saved to $savePath')),
+              );
+            },
+            onError: (e) {
+              setState(() {
+                _downloadTasks.last.isDownloading = false;
+                _isDownloadInProgress = false; // Reset the flag
+              });
+              timer.cancel();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error: ${e.toString()}')),
+              );
+            },
+            cancelOnError: true,
           );
 
-          // For iOS, you might need to make the file available via the Files app
-          if (Platform.isIOS) {
-            // Use a plugin like share_plus to make the file accessible
-          }
+          setState(() {
+            _downloadTasks.add(_DownloadTask(
+              url: url,
+              selectedFormat: _selectedFormat,
+              isDownloading: true,
+              progress: 0.0,
+              downloadedMB: 0.0,
+              totalSizeMB: totalSize / (1024 * 1024),
+              downloadSpeed: 0.0,
+              videoTitle: videoTitle,
+              thumbnailUrl: video.thumbnails.standardResUrl,
+              subscription: subscription,
+              output: output,
+              timer: timer,
+            ));
+          });
         } else {
           throw Exception('Could not access storage directory');
         }
       } catch (e) {
-        setState(() {
-          _isDownloading = false;
-        });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${e.toString()}')),
         );
@@ -121,18 +173,30 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  void _cancelDownload(int index) {
+    var task = _downloadTasks[index];
+    task.subscription?.cancel();
+    task.output?.close();
+    task.timer?.cancel();
+    setState(() {
+      _downloadTasks.removeAt(index);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Download canceled')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: TextField(
@@ -151,24 +215,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
             ),
-            /*const SizedBox(
-              height: 10,
-            ),
-            GestureDetector(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: Colors.lightBlue,
-                  borderRadius: BorderRadius.all(Radius.circular(10)),
-                ),
-                width: MediaQuery.sizeOf(context).width,
-                child: const Text(
-                  "Generate video content",
-                  style: TextStyle(color: Colors.white),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),*/
             const SizedBox(
               height: 10,
             ),
@@ -182,16 +228,20 @@ class _MyHomePageState extends State<MyHomePage> {
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: _selectedFormat == 'MP4'
-                            ? Colors.lightBlue
-                            : Colors.grey[400],
+                            ? const Color(0xFF58C2FF)
+                            : Colors.grey[300],
                         borderRadius: const BorderRadius.only(
                           topLeft: Radius.circular(10),
                           bottomLeft: Radius.circular(10),
                         ),
                       ),
-                      child: const Text(
+                      child: Text(
                         "MP4",
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(
+                          color: _selectedFormat == 'MP4'
+                              ? Colors.white
+                              : Colors.grey[800],
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -204,16 +254,20 @@ class _MyHomePageState extends State<MyHomePage> {
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: _selectedFormat == 'MP3'
-                            ? Colors.lightBlue
-                            : Colors.grey[400],
+                            ? const Color(0xFF58C2FF)
+                            : Colors.grey[300],
                         borderRadius: const BorderRadius.only(
                           topRight: Radius.circular(10),
                           bottomRight: Radius.circular(10),
                         ),
                       ),
-                      child: const Text(
+                      child: Text(
                         "MP3",
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(
+                          color: _selectedFormat == 'MP3'
+                              ? Colors.white
+                              : Colors.grey[800],
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -225,26 +279,139 @@ class _MyHomePageState extends State<MyHomePage> {
               height: 10,
             ),
             GestureDetector(
-              onTap: () => _downloadVideo(_controller.text),
+              onTap: _isDownloadInProgress
+                  ? null
+                  : () => _downloadVideo(_controller.text),
               child: Container(
                 padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: Colors.lightBlue,
-                  borderRadius: BorderRadius.all(Radius.circular(10)),
+                decoration: BoxDecoration(
+                  color: _isDownloadInProgress
+                      ? Colors.grey
+                      : const Color(0xFF58C2FF),
+                  borderRadius: const BorderRadius.all(Radius.circular(10)),
                 ),
-                width: MediaQuery.sizeOf(context).width,
-                child: _isDownloading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        "Download",
-                        style: TextStyle(color: Colors.white),
-                        textAlign: TextAlign.center,
-                      ),
+                width: MediaQuery.of(context).size.width,
+                child: Text(
+                  _isDownloadInProgress ? "Downloading..." : "Download",
+                  style: const TextStyle(color: Colors.white),
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
+            const SizedBox(
+              height: 10,
+            ),
+            Expanded(
+              child: ListView.builder(
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: _downloadTasks.length,
+                  itemBuilder: (context, index) {
+                    var task = _downloadTasks[index];
+                    return Row(
+                      children: [
+                        if (task.thumbnailUrl != null)
+                          SizedBox(
+                              width: 80,
+                              height: 60,
+                              child: Image.network(task.thumbnailUrl!))
+                        else
+                          const SizedBox.shrink(),
+                        const SizedBox(
+                          width: 10,
+                        ),
+                        Expanded(
+                          // Add this Expanded widget
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  SizedBox(
+                                    width: 200,
+                                    child: Text(
+                                      maxLines: 1,
+                                      task.videoTitle,
+                                      style: const TextStyle(
+                                        overflow: TextOverflow.ellipsis,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                      textAlign: TextAlign.left,
+                                    ),
+                                  ),
+                                  task.isDownloading
+                                      ? GestureDetector(
+                                          onTap: () => _cancelDownload(index),
+                                          child: const Icon(
+                                            Icons.cancel,
+                                            color: Colors.red,
+                                          ))
+                                      : const Icon(
+                                          Icons.task,
+                                          color: Colors.greenAccent,
+                                        ),
+                                ],
+                              ),
+                              const SizedBox(height: 5),
+                              LinearProgressIndicator(
+                                  minHeight: 7,
+                                  borderRadius: BorderRadius.circular(10),
+                                  value: task.progress,
+                                  backgroundColor: Colors.grey[300],
+                                  color: const Color(0xFF58C2FF)),
+                              const SizedBox(height: 10),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                      '${task.downloadedMB.toStringAsFixed(2)}MB / ${task.totalSizeMB.toStringAsFixed(2)}MB'),
+                                  Text(
+                                      '${task.downloadSpeed.toStringAsFixed(2)} MB/s'),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+            )
           ],
         ),
       ),
     );
   }
+}
+
+class _DownloadTask {
+  String url;
+  String selectedFormat;
+  bool isDownloading;
+  double progress;
+  double downloadedMB;
+  double totalSizeMB;
+  double downloadSpeed;
+  String videoTitle;
+  String? thumbnailUrl;
+  StreamSubscription<List<int>>? subscription;
+  IOSink? output;
+  Timer? timer;
+
+  _DownloadTask({
+    required this.url,
+    required this.selectedFormat,
+    this.isDownloading = false,
+    this.progress = 0.0,
+    this.downloadedMB = 0.0,
+    this.totalSizeMB = 0.0,
+    this.downloadSpeed = 0.0,
+    this.videoTitle = '',
+    this.thumbnailUrl,
+    this.subscription,
+    this.output,
+    this.timer,
+  });
 }
