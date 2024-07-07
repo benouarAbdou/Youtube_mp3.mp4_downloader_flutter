@@ -43,6 +43,7 @@ dependencies:
   device_info_plus: ^9.1.2
   media_scanner: ^2.1.0
   media_store_plus: ^0.1.2
+  video_thumbnail: ^0.5.3
 
 dev_dependencies:
   flutter_test:

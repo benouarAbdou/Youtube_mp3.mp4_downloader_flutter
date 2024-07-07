@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:ffi';
 import 'dart:io';
-
+import 'package:path/path.dart' as path;
 import 'package:flutter/material.dart';
-import 'package:media_store_plus/media_store_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -44,6 +42,35 @@ class _MyHomePageState extends State<MyHomePage> {
   String _selectedFormat = 'MP4';
   final List<_DownloadTask> _downloadTasks = [];
   bool _isDownloadInProgress = false;
+
+  Future<void> _loadExistingFiles() async {
+    final directory = Directory('/storage/emulated/0/ytbinstaDownloader');
+    if (await directory.exists()) {
+      final files = directory.listSync();
+      for (var file in files) {
+        if (file is File) {
+          final fileName = path.basename(file.path);
+          final fileExtension = path.extension(file.path).toLowerCase();
+          final fileSize = await file.length();
+          final fileSizeMB = fileSize / (1024 * 1024);
+
+          setState(() {
+            _downloadTasks.add(_DownloadTask(
+              url: '', // We don't have the original URL
+              selectedFormat: fileExtension == '.mp3' ? 'MP3' : 'MP4',
+              isDownloading: false,
+              progress: 1.0,
+              downloadedMB: fileSizeMB,
+              totalSizeMB: fileSizeMB,
+              downloadSpeed: 0.0,
+              videoTitle: path.basenameWithoutExtension(fileName),
+              thumbnailUrl: null, // We don't have the thumbnail URL
+            ));
+          });
+        }
+      }
+    }
+  }
 
   void _selectFormat(String format) {
     setState(() {
@@ -100,10 +127,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 (downloadedBytes / timer.tick) / (1024 * 1024); // MB/s
             var progress = downloadedBytes / totalSize;
             setState(() {
-              _downloadTasks.last.progress = progress;
-              _downloadTasks.last.downloadedMB =
+              _downloadTasks.first.progress = progress;
+              _downloadTasks.first.downloadedMB =
                   downloadedBytes / (1024 * 1024); // Convert to MB
-              _downloadTasks.last.downloadSpeed = downloadSpeed;
+              _downloadTasks.first.downloadSpeed = downloadSpeed;
             });
           });
 
@@ -117,8 +144,8 @@ class _MyHomePageState extends State<MyHomePage> {
               ytExplode.close();
               timer.cancel();
               setState(() {
-                _downloadTasks.last.isDownloading = false;
-                _downloadTasks.last.progress =
+                _downloadTasks.first.isDownloading = false;
+                _downloadTasks.first.progress =
                     1.0; // Ensure progress reaches 100%
                 _isDownloadInProgress = false; // Reset the flag
               });
@@ -131,7 +158,7 @@ class _MyHomePageState extends State<MyHomePage> {
             },
             onError: (e) {
               setState(() {
-                _downloadTasks.last.isDownloading = false;
+                _downloadTasks.first.isDownloading = false;
                 _isDownloadInProgress = false; // Reset the flag
               });
               timer.cancel();
@@ -143,20 +170,23 @@ class _MyHomePageState extends State<MyHomePage> {
           );
 
           setState(() {
-            _downloadTasks.add(_DownloadTask(
-              url: url,
-              selectedFormat: _selectedFormat,
-              isDownloading: true,
-              progress: 0.0,
-              downloadedMB: 0.0,
-              totalSizeMB: totalSize / (1024 * 1024),
-              downloadSpeed: 0.0,
-              videoTitle: videoTitle,
-              thumbnailUrl: video.thumbnails.standardResUrl,
-              subscription: subscription,
-              output: output,
-              timer: timer,
-            ));
+            _downloadTasks.insert(
+              0, // Insert at the beginning of the list
+              _DownloadTask(
+                url: url,
+                selectedFormat: _selectedFormat,
+                isDownloading: true,
+                progress: 0.0,
+                downloadedMB: 0.0,
+                totalSizeMB: totalSize / (1024 * 1024),
+                downloadSpeed: 0.0,
+                videoTitle: videoTitle,
+                thumbnailUrl: video.thumbnails.standardResUrl,
+                subscription: subscription,
+                output: output,
+                timer: timer,
+              ),
+            );
           });
         } else {
           throw Exception('Could not access storage directory');
@@ -184,6 +214,13 @@ class _MyHomePageState extends State<MyHomePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Download canceled')),
     );
+  }
+
+  @override
+  void initState() {
+    // TODO: implement initState
+    super.initState();
+    _loadExistingFiles();
   }
 
   @override
@@ -299,10 +336,11 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             const SizedBox(
-              height: 10,
+              height: 20,
             ),
             Expanded(
               child: ListView.builder(
+                  padding: EdgeInsets.zero,
                   physics: const BouncingScrollPhysics(),
                   itemCount: _downloadTasks.length,
                   itemBuilder: (context, index) {
@@ -315,7 +353,14 @@ class _MyHomePageState extends State<MyHomePage> {
                               height: 60,
                               child: Image.network(task.thumbnailUrl!))
                         else
-                          const SizedBox.shrink(),
+                          const SizedBox(
+                            width: 80,
+                            height: 60,
+                            child: Icon(
+                              Icons.video_file_rounded,
+                              color: Color(0xFF58C2FF),
+                            ),
+                          ),
                         const SizedBox(
                           width: 10,
                         ),
