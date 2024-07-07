@@ -44,6 +44,7 @@ dependencies:
   media_scanner: ^2.1.0
   media_store_plus: ^0.1.2
   video_thumbnail: ^0.5.3
+  flutter_ffmpeg: ^0.4.2 # Add this line
 
 dev_dependencies:
   flutter_test:
