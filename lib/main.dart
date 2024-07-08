@@ -42,7 +42,11 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _controller = TextEditingController();
   String _selectedFormat = 'MP4';
-  final List<_DownloadTask> _downloadTasks = [];
+  final List<_DownloadTask> _newTasks = [];
+  final List<_DownloadTask> _oldVideos = [];
+  final List<_DownloadTask> _oldAudios = [];
+  String _selectedTab = 'New Tasks';
+
   bool _isDownloadInProgress = false;
 
   Future<void> _loadExistingFiles() async {
@@ -66,18 +70,24 @@ class _MyHomePageState extends State<MyHomePage> {
             );
           }
 
+          final task = _DownloadTask(
+            url: '', // We don't have the original URL
+            selectedFormat: fileExtension == '.mp3' ? 'MP3' : 'MP4',
+            isDownloading: false,
+            progress: 1.0,
+            downloadedMB: fileSizeMB,
+            totalSizeMB: fileSizeMB,
+            downloadSpeed: 0.0,
+            videoTitle: path.basenameWithoutExtension(fileName),
+            thumbnailData: thumbnailData,
+          );
+
           setState(() {
-            _downloadTasks.add(_DownloadTask(
-              url: '', // We don't have the original URL
-              selectedFormat: fileExtension == '.mp3' ? 'MP3' : 'MP4',
-              isDownloading: false,
-              progress: 1.0,
-              downloadedMB: fileSizeMB,
-              totalSizeMB: fileSizeMB,
-              downloadSpeed: 0.0,
-              videoTitle: path.basenameWithoutExtension(fileName),
-              thumbnailData: thumbnailData,
-            ));
+            if (fileExtension == '.mp4') {
+              _oldVideos.add(task);
+            } else if (fileExtension == '.mp3') {
+              _oldAudios.add(task);
+            }
           });
         }
       }
@@ -139,10 +149,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 (downloadedBytes / timer.tick) / (1024 * 1024); // MB/s
             var progress = downloadedBytes / totalSize;
             setState(() {
-              _downloadTasks.first.progress = progress;
-              _downloadTasks.first.downloadedMB =
+              _newTasks.first.progress = progress;
+              _newTasks.first.downloadedMB =
                   downloadedBytes / (1024 * 1024); // Convert to MB
-              _downloadTasks.first.downloadSpeed = downloadSpeed;
+              _newTasks.first.downloadSpeed = downloadSpeed;
             });
           });
 
@@ -156,9 +166,9 @@ class _MyHomePageState extends State<MyHomePage> {
               ytExplode.close();
               timer.cancel();
               setState(() {
-                _downloadTasks.first.isDownloading = false;
-                _downloadTasks.first.progress =
-                    1.0; // Ensure progress reaches 100%
+                _newTasks.first.downloadedMB = _newTasks.first.totalSizeMB;
+                _newTasks.first.isDownloading = false;
+                _newTasks.first.progress = 1.0; // Ensure progress reaches 100%
                 _isDownloadInProgress = false; // Reset the flag
               });
 
@@ -170,7 +180,7 @@ class _MyHomePageState extends State<MyHomePage> {
             },
             onError: (e) {
               setState(() {
-                _downloadTasks.first.isDownloading = false;
+                _newTasks.first.isDownloading = false;
                 _isDownloadInProgress = false; // Reset the flag
               });
               timer.cancel();
@@ -182,7 +192,7 @@ class _MyHomePageState extends State<MyHomePage> {
           );
 
           setState(() {
-            _downloadTasks.insert(
+            _newTasks.insert(
               0, // Insert at the beginning of the list
               _DownloadTask(
                 url: url,
@@ -222,12 +232,12 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _cancelDownload(int index) {
-    var task = _downloadTasks[index];
+    var task = _newTasks[index];
     task.subscription?.cancel();
     task.output?.close();
     task.timer?.cancel();
     setState(() {
-      _downloadTasks.removeAt(index);
+      _newTasks.removeAt(index);
       _isDownloadInProgress = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -250,7 +260,7 @@ class _MyHomePageState extends State<MyHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: SafeArea(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
@@ -356,107 +366,177 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 ),
               ),
-              const SizedBox(
-                height: 20,
+              const SizedBox(height: 20),
+              TaskTabs(
+                selectedTab: _selectedTab,
+                onTabSelected: (tab) {
+                  setState(() {
+                    _selectedTab = tab;
+                  });
+                },
               ),
+              const SizedBox(height: 10),
               Expanded(
-                child: ListView.builder(
-                    padding: EdgeInsets.zero,
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: _downloadTasks.length,
-                    itemBuilder: (context, index) {
-                      var task = _downloadTasks[index];
-                      return Row(
-                        children: [
-                          if (task.thumbnailData != null)
-                            SizedBox(
-                              width: 80,
-                              height: 60,
-                              child: Image.memory(task.thumbnailData!),
-                            )
-                          else if (task.thumbnailUrl != null)
-                            SizedBox(
-                              width: 80,
-                              height: 60,
-                              child: Image.network(task.thumbnailUrl!),
-                            )
-                          else
-                            SizedBox(
-                              width: 80,
-                              height: 60,
-                              child: Icon(
-                                task.selectedFormat == 'MP3'
-                                    ? Icons.audio_file_rounded
-                                    : Icons.video_file_rounded,
-                                color: const Color(0xFF58C2FF),
-                                size: 20,
-                              ),
-                            ),
-                          const SizedBox(
-                            width: 10,
-                          ),
-                          Expanded(
-                            // Add this Expanded widget
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    SizedBox(
-                                      width: 200,
-                                      child: Text(
-                                        maxLines: 1,
-                                        task.videoTitle,
-                                        style: const TextStyle(
-                                          overflow: TextOverflow.ellipsis,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                        ),
-                                        textAlign: TextAlign.left,
-                                      ),
-                                    ),
-                                    task.isDownloading
-                                        ? GestureDetector(
-                                            onTap: () => _cancelDownload(index),
-                                            child: const Icon(
-                                              Icons.cancel,
-                                              color: Colors.red,
-                                            ))
-                                        : const Icon(
-                                            Icons.check_circle,
-                                            color: Colors.greenAccent,
-                                          ),
-                                  ],
-                                ),
-                                const SizedBox(height: 5),
-                                LinearProgressIndicator(
-                                    minHeight: 7,
-                                    borderRadius: BorderRadius.circular(10),
-                                    value: task.progress,
-                                    backgroundColor: Colors.grey[300],
-                                    color: const Color(0xFF58C2FF)),
-                                const SizedBox(height: 10),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                        '${task.downloadedMB.toStringAsFixed(2)}MB / ${task.totalSizeMB.toStringAsFixed(2)}MB'),
-                                    Text(
-                                        '${task.downloadSpeed.toStringAsFixed(2)} MB/s'),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      );
-                    }),
-              )
+                child: _buildSelectedTaskList(),
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectedTaskList() {
+    switch (_selectedTab) {
+      case 'New Tasks':
+        return _buildTaskList(_newTasks, true);
+      case 'Videos':
+        return _buildTaskList(_oldVideos, false);
+      case 'Audios':
+        return _buildTaskList(_oldAudios, false);
+      default:
+        return Container();
+    }
+  }
+
+  Widget _buildTaskList(List<_DownloadTask> tasks, bool isNewTask) {
+    if (tasks.isNotEmpty) {
+      return ListView.builder(
+        physics: const BouncingScrollPhysics(),
+        itemCount: tasks.length,
+        itemBuilder: (context, index) {
+          var task = tasks[index];
+          return Row(
+            children: [
+              if (task.thumbnailData != null)
+                SizedBox(
+                  width: 80,
+                  height: 60,
+                  child: Image.memory(task.thumbnailData!),
+                )
+              else if (task.thumbnailUrl != null)
+                SizedBox(
+                  width: 80,
+                  height: 60,
+                  child: Image.network(task.thumbnailUrl!),
+                )
+              else
+                SizedBox(
+                  width: 80,
+                  height: 60,
+                  child: Icon(
+                    task.selectedFormat == 'MP3'
+                        ? Icons.audio_file_rounded
+                        : Icons.video_file_rounded,
+                    color: const Color(0xFF58C2FF),
+                    size: 20,
+                  ),
+                ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        SizedBox(
+                          width: 200,
+                          child: Text(
+                            task.videoTitle,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              overflow: TextOverflow.ellipsis,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                            textAlign: TextAlign.left,
+                          ),
+                        ),
+                        if (isNewTask && task.isDownloading)
+                          GestureDetector(
+                            onTap: () => _cancelDownload(index),
+                            child: const Icon(
+                              Icons.cancel,
+                              color: Colors.red,
+                            ),
+                          )
+                        else
+                          const Icon(
+                            Icons.check_circle,
+                            color: Colors.greenAccent,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    LinearProgressIndicator(
+                      minHeight: 7,
+                      value: task.progress,
+                      backgroundColor: Colors.grey[300],
+                      color: const Color(0xFF58C2FF),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${task.downloadedMB.toStringAsFixed(2)}MB / ${task.totalSizeMB.toStringAsFixed(2)}MB',
+                        ),
+                        Text('${task.downloadSpeed.toStringAsFixed(2)} MB/s'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      return const Text(
+        "No tasks to show!",
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 18,
+        ),
+      );
+    }
+  }
+}
+
+class TaskTabs extends StatelessWidget {
+  final String selectedTab;
+  final Function(String) onTabSelected;
+
+  const TaskTabs({
+    Key? key,
+    required this.selectedTab,
+    required this.onTabSelected,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _buildTab('New Tasks'),
+        _buildTab('Videos'),
+        _buildTab('Audios'),
+      ],
+    );
+  }
+
+  Widget _buildTab(String tabName) {
+    return GestureDetector(
+      onTap: () => onTabSelected(tabName),
+      child: Text(
+        tabName,
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight:
+              selectedTab == tabName ? FontWeight.bold : FontWeight.normal,
+          color:
+              selectedTab == tabName ? const Color(0xFF58C2FF) : Colors.black,
         ),
       ),
     );
