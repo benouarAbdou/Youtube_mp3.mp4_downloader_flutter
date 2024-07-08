@@ -80,7 +80,28 @@ class _MyHomePageState extends State<MyHomePage> {
 
     await flutterLocalNotificationsPlugin.show(
       0,
-      'Now Downloading',
+      'Now Downloading ❕',
+      title,
+      platformChannelSpecifics,
+      payload: 'item x',
+    );
+  }
+
+  Future<void> showDoneNotification(String title) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+      'audioId',
+      'AudioName',
+      importance: Importance.high,
+      priority: Priority.high,
+      showWhen: false,
+    );
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Finished downloading ✔️',
       title,
       platformChannelSpecifics,
       payload: 'item x',
@@ -213,7 +234,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 _newTasks.first.progress = 1.0; // Ensure progress reaches 100%
                 _isDownloadInProgress = false; // Reset the flag
               });
+
               cancelNotification();
+              showDoneNotification(videoTitle);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                     content: Text(
