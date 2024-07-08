@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -8,8 +9,21 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-void main() {
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeNotifications();
   runApp(const MyApp());
+}
+
+Future<void> initializeNotifications() async {
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings =
+      InitializationSettings(android: initializationSettingsAndroid);
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 }
 
 class MyApp extends StatelessWidget {
@@ -19,7 +33,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Flutter Demo',
+      title: 'Video downloader',
       theme: ThemeData(
         useMaterial3: false,
         fontFamily: 'Folks',
@@ -48,6 +62,34 @@ class _MyHomePageState extends State<MyHomePage> {
   String _selectedTab = 'New Tasks';
 
   bool _isDownloadInProgress = false;
+
+  Future<void> showNotification(String title) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+      'audioId',
+      'AudioName',
+      importance: Importance.low,
+      priority: Priority.high,
+      showWhen: false,
+      vibrationPattern: null, // Remove vibrations
+      enableVibration: false, // Ensure vibration is disabled
+      ongoing: true, // Make notification non-dismissible
+    );
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Now Downloading',
+      title,
+      platformChannelSpecifics,
+      payload: 'item x',
+    );
+  }
+
+  void cancelNotification() async {
+    await flutterLocalNotificationsPlugin.cancel(0);
+  }
 
   Future<void> _loadExistingFiles() async {
     final directory = Directory('/storage/emulated/0/ytbinstaDownloader');
@@ -171,7 +213,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 _newTasks.first.progress = 1.0; // Ensure progress reaches 100%
                 _isDownloadInProgress = false; // Reset the flag
               });
-
+              cancelNotification();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                     content: Text(
@@ -183,6 +225,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 _newTasks.first.isDownloading = false;
                 _isDownloadInProgress = false; // Reset the flag
               });
+              cancelNotification();
               timer.cancel();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Error: ${e.toString()}')),
@@ -209,17 +252,20 @@ class _MyHomePageState extends State<MyHomePage> {
                 timer: timer,
               ),
             );
+            showNotification(videoTitle);
           });
         } else {
           setState(() {
             _isDownloadInProgress = false;
           });
+          cancelNotification();
           throw Exception('Could not access storage directory');
         }
       } catch (e) {
         setState(() {
           _isDownloadInProgress = false;
         });
+        cancelNotification();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${e.toString()}')),
         );
@@ -228,6 +274,7 @@ class _MyHomePageState extends State<MyHomePage> {
       setState(() {
         _isDownloadInProgress = false;
       });
+      cancelNotification();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Storage permission denied')),
       );
@@ -243,6 +290,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _newTasks.removeAt(index);
       _isDownloadInProgress = false;
     });
+    cancelNotification();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Download canceled')),
     );
@@ -253,6 +301,13 @@ class _MyHomePageState extends State<MyHomePage> {
     // TODO: implement initState
     super.initState();
     _loadExistingFiles();
+  }
+
+  @override
+  void dispose() {
+    cancelNotification(); // Cancel the notification when app is disposed
+
+    super.dispose();
   }
 
   @override

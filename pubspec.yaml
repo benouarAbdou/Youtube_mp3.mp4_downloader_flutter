@@ -45,6 +45,7 @@ dependencies:
   media_store_plus: ^0.1.2
   video_thumbnail: ^0.5.3
   flutter_ffmpeg: ^0.4.2 # Add this line
+  flutter_local_notifications: ^17.2.1+1
 
 dev_dependencies:
   flutter_test:
