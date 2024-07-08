@@ -84,9 +84,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
           setState(() {
             if (fileExtension == '.mp4') {
-              _oldVideos.add(task);
+              _oldVideos.insert(0, task);
             } else if (fileExtension == '.mp3') {
-              _oldAudios.add(task);
+              _oldAudios.insert(0, task);
             }
           });
         }
@@ -211,20 +211,23 @@ class _MyHomePageState extends State<MyHomePage> {
             );
           });
         } else {
-          _isDownloadInProgress = false;
-
+          setState(() {
+            _isDownloadInProgress = false;
+          });
           throw Exception('Could not access storage directory');
         }
       } catch (e) {
-        _isDownloadInProgress = false;
-
+        setState(() {
+          _isDownloadInProgress = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${e.toString()}')),
         );
       }
     } else {
-      _isDownloadInProgress = false;
-
+      setState(() {
+        _isDownloadInProgress = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Storage permission denied')),
       );
@@ -465,17 +468,19 @@ class _MyHomePageState extends State<MyHomePage> {
                           const Icon(
                             Icons.check_circle,
                             color: Colors.greenAccent,
+                            size: 18,
                           ),
                       ],
                     ),
                     const SizedBox(height: 5),
                     LinearProgressIndicator(
+                      borderRadius: BorderRadius.circular(10),
                       minHeight: 7,
                       value: task.progress,
                       backgroundColor: Colors.grey[300],
                       color: const Color(0xFF58C2FF),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 5),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
